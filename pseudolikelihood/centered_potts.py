@@ -182,29 +182,3 @@ def neighbors_from_edges(edges, y):
         neighbors[j] += Y_multi[i]
 
     return neighbors
-
-import sklearn
-from sklearn.datasets import load_iris
-from sklearn.linear_model import LogisticRegression
-
-
-iris = load_iris()
-target = iris.target_names[iris.target]
-print(target)
-
-
-lr = LogisticRegression(fit_intercept=True,
-                        multi_class='multinomial',
-                        solver='lbfgs',
-                        C=1000000000000000000000000000000)
-lr.fit(iris.data, iris.target)
-
-print(lr.predict_proba(iris.data)[50])
-
-
-lr = CenteredPotts(C=1000000000000000000000000000000)
-lr.fit((iris.data, np.array([])), iris.target)
-
-print(lr.predict_proba((iris.data, np.array([])), iris.target)[50])
-
-
