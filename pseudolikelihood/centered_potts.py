@@ -119,13 +119,22 @@ def _multinomial_loss(w, features, neighbors, Y, alpha, sample_weight):
     eta = w[:, -1:]
     p = safe_sparse_dot(features, betas.T)
     p += intercept
-    p += (eta * neighbors[:-1, :, 1]).T
+
+    p_nonspatial = np.hstack((p, np.zeros((features.shape[0], 1))))
+    p_nonspatial -= logsumexp(p_nonspatial, axis=1)[:, np.newaxis]
+    p_nonspatial = np.exp(p_nonspatial, p_nonspatial)[:, :-1]
+
+    spatial = (neighbors[:-1, :, 0] * (0 - p_nonspatial).T +
+               neighbors[:-1, :, 1] * (1 - p_nonspatial).T)
+    p += (eta * spatial).T
+
     p = np.hstack((p, np.zeros((features.shape[0], 1))))
     p -= logsumexp(p, axis=1)[:, np.newaxis]
+
     loss = -(sample_weight * Y * p).sum()
     loss += 0.5 * alpha * squared_norm(w)
     p = np.exp(p, p)
-    return loss, p, w
+    return loss, p_nonspatial, p, w
 
 
 def _multinomial_loss_grad(w, features, neighbors, Y, alpha, sample_weight):
@@ -160,14 +169,18 @@ def _multinomial_loss_grad(w, features, neighbors, Y, alpha, sample_weight):
     n_classes = Y.shape[1]
     n_features = features.shape[1]
     grad = np.zeros((n_classes - 1, n_features + 2))
-    loss, p, w = _multinomial_loss(w, features, neighbors, Y, alpha, sample_weight)
+    loss, p_nonspatial, p, w = _multinomial_loss(w, features, neighbors, Y,
+                                                 alpha, sample_weight)
     sample_weight = sample_weight[:, np.newaxis]
     diff = sample_weight * (p - Y)[:, :n_classes-1]
     grad[:, 1:n_features + 1] = safe_sparse_dot(diff.T, features)
-    grad[:, -1] = (neighbors[:-1, : ,1] * diff.T).sum(axis=1)
+
+    spatial = (neighbors[:-1, :, 0] * (0 - p_nonspatial).T +
+               neighbors[:-1, :, 1] * (1 - p_nonspatial).T)
+    
+    grad[:, -1] = (spatial * diff.T).sum(axis=1)
     grad[:, 1:n_features + 2] += alpha * w
     grad[:, 0] = diff.sum(axis=0)
-    print(grad)
     return loss, grad.ravel(), p
 
 
