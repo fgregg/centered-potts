@@ -116,10 +116,10 @@ def _multinomial_loss(w, features, neighbors, Y, alpha, sample_weight):
     intercept = w[:, 0]
     w = w[:, 1:]
     betas = w[:, :-1]
-    eta = w[:, -1]
+    eta = w[:, -1:]
     p = safe_sparse_dot(features, betas.T)
     p += intercept
-    p += eta * ((1 - Y) * neighbors).sum()
+    p += (eta * neighbors[:-1, :, 1]).T
     p = np.hstack((p, np.zeros((features.shape[0], 1))))
     p -= logsumexp(p, axis=1)[:, np.newaxis]
     loss = -(sample_weight * Y * p).sum()
@@ -164,10 +164,12 @@ def _multinomial_loss_grad(w, features, neighbors, Y, alpha, sample_weight):
     sample_weight = sample_weight[:, np.newaxis]
     diff = sample_weight * (p - Y)[:, :n_classes-1]
     grad[:, 1:n_features + 1] = safe_sparse_dot(diff.T, features)
-    grad[:, -1] = safe_sparse_dot(diff.T, neighbors).sum() #?
+    grad[:, -1] = (neighbors[:-1, : ,1] * diff.T).sum(axis=1)
     grad[:, 1:n_features + 2] += alpha * w
     grad[:, 0] = diff.sum(axis=0)
+    print(grad)
     return loss, grad.ravel(), p
+
 
 def neighbors_from_edges(edges, y):
     # assumes that edges are unique and only exist once i.e. if 1, 0
@@ -181,4 +183,9 @@ def neighbors_from_edges(edges, y):
         neighbors[i] += Y_multi[j]
         neighbors[j] += Y_multi[i]
 
-    return neighbors
+    potts_neighbors = np.zeros((3, neighbors.shape[0], 2))
+    for cls in range(neighbors.shape[1]):
+        potts_neighbors[cls][:, 0] = neighbors[:, cls]
+        potts_neighbors[cls][:, 1] = neighbors.sum(axis=1) - neighbors[:, cls]
+
+    return potts_neighbors
