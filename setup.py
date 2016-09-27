@@ -13,7 +13,7 @@ setup(
     author='Forest Gregg',
     author_email='fgregg@uchicag.edu',
     description='Estimate models with categorical, coupled outcomes using pseudolikelihood',
-    packages=['psuedolikelihood'],
+    packages=['pseudolikelihood'],
     install_requires=['numpy', 'sklearn', 'scipy'],
     classifiers=[
         'Development Status :: 4 - Beta',
