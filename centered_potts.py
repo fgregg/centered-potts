@@ -7,7 +7,6 @@ from sklearn.utils.extmath import (logsumexp, safe_sparse_dot, squared_norm,
                                    softmax)
 
 
-
 class CenteredPotts(object):
     def __init__(self, tol=1e-4, max_iter=100, verbose=0, C=1.0):
         self.tol = tol
@@ -16,8 +15,12 @@ class CenteredPotts(object):
         self.C = C
 
     def fit(self, X, y):
+        features, edges = X
+
+        neighbors = neighbors_from_edges(edges, y)
+
         self.classes_ = np.unique(y)
-        n_samples, n_features = X.shape
+        n_samples, n_features = features.shape
 
         n_classes = len(self.classes_)
         if n_classes < 2:
@@ -25,14 +28,12 @@ class CenteredPotts(object):
                              " in the data, but the data contains only one"
 " class: %r" % classes_[0])
 
-        sample_weight = np.ones(X.shape[0])
+        sample_weight = np.ones(features.shape[0])
 
         lbin = LabelBinarizer()
         Y_multi = lbin.fit_transform(y)
-        if Y_multi.shape[1] == 1:
-            Y_multi = np.hstack([1 - Y_multi, Y_multi])
             
-        w0 = np.zeros((self.classes_.size - 1, n_features + 1),
+        w0 = np.zeros((self.classes_.size - 1, n_features + 2),
                       order='F')
 
         w0 = w0.ravel()
@@ -42,7 +43,7 @@ class CenteredPotts(object):
 
         w0, loss, info = optimize.fmin_l_bfgs_b(
             func, w0, fprime=None,
-            args=(X, target, 1. / self.C, sample_weight),
+            args=(features, neighbors, target, 1. / self.C, sample_weight),
             iprint=(self.verbose > 0) - 1, pgtol=self.tol, maxiter=self.max_iter)
 
         if info["warnflag"] == 1 and self.verbose > 0:
@@ -53,28 +54,33 @@ class CenteredPotts(object):
 
         self.coef_ = np.reshape(w0, (self.classes_.size - 1, -1))
 
-        self.intercept_ = self.coef_[:, -1]
-        self.coef_ = self.coef_[:, :-1]
+        self.intercept_ = self.coef_[:, 0]
+        self.coef_ = self.coef_[:, 1:]
+        
 
         return self
         
         
-    def _loss(self, X, y):
-        pass
+    def predict_proba(self, X, y):
+        features, edges = X
+        neighbors = neighbors_from_edges(edges, y)
 
-    def _loss_grad(self, X, y):
-        pass
+        lbin = LabelBinarizer()
+        Y_multi = lbin.fit_transform(y)
 
-    def predict_proba(self, X):
-        scores = safe_sparse_dot(X, self.coef_.T, dense_output=True)
+        betas = self.coef_[:, :-1]
+        eta = self.coef_[:, -1]
+
+        scores = safe_sparse_dot(features, betas.T, dense_output=True)
         scores += self.intercept_
-        scores = np.hstack((scores, np.zeros((X.shape[0], 1))))
+        scores += eta * ((1 - Y_multi) * neighbors).sum()
+
+        scores = np.hstack((scores, np.zeros((features.shape[0], 1))))
         return softmax(scores)
 
 
 
-
-def _multinomial_loss(w, X, Y, alpha, sample_weight):
+def _multinomial_loss(w, features, neighbors, Y, alpha, sample_weight):
     """Computes multinomial loss and class probabilities.
     Parameters
     ----------
@@ -104,14 +110,17 @@ def _multinomial_loss(w, X, Y, alpha, sample_weight):
     Springer. (Chapter 4.3.4)
     """
     n_classes = Y.shape[1]
-    n_features = X.shape[1]
+    n_features = features.shape[1]
     w = w.reshape(n_classes - 1, -1)
     sample_weight = sample_weight[:, np.newaxis]
-    intercept = w[:, -1]
-    w = w[:, :-1]
-    p = safe_sparse_dot(X, w.T)
+    intercept = w[:, 0]
+    w = w[:, 1:]
+    betas = w[:, :-1]
+    eta = w[:, -1]
+    p = safe_sparse_dot(features, betas.T)
     p += intercept
-    p = np.hstack((p, np.zeros((X.shape[0], 1))))
+    p += eta * ((1 - Y) * neighbors).sum()
+    p = np.hstack((p, np.zeros((features.shape[0], 1))))
     p -= logsumexp(p, axis=1)[:, np.newaxis]
     loss = -(sample_weight * Y * p).sum()
     loss += 0.5 * alpha * squared_norm(w)
@@ -119,15 +128,15 @@ def _multinomial_loss(w, X, Y, alpha, sample_weight):
     return loss, p, w
 
 
-def _multinomial_loss_grad(w, X, Y, alpha, sample_weight):
+def _multinomial_loss_grad(w, features, neighbors, Y, alpha, sample_weight):
     """Computes the multinomial loss, gradient and class probabilities.
     Parameters
     ----------
     w : ndarray, shape (n_classes * n_features,) or
         (n_classes * (n_features + 1),)
         Coefficient vector.
-    X : {array-like, sparse matrix}, shape (n_samples, n_features)
-        Training data.
+    features : {array-like, sparse matrix}, shape (n_samples, n_features)
+               Training data.
     Y : ndarray, shape (n_samples, n_classes)
         Transformed labels according to the output of LabelBinarizer.
     alpha : float
@@ -149,15 +158,30 @@ def _multinomial_loss_grad(w, X, Y, alpha, sample_weight):
     Springer. (Chapter 4.3.4)
     """
     n_classes = Y.shape[1]
-    n_features = X.shape[1]
-    grad = np.zeros((n_classes - 1, n_features + 1))
-    loss, p, w = _multinomial_loss(w, X, Y, alpha, sample_weight)
+    n_features = features.shape[1]
+    grad = np.zeros((n_classes - 1, n_features + 2))
+    loss, p, w = _multinomial_loss(w, features, neighbors, Y, alpha, sample_weight)
     sample_weight = sample_weight[:, np.newaxis]
     diff = sample_weight * (p - Y)[:, :n_classes-1]
-    grad[:, :n_features] = safe_sparse_dot(diff.T, X)
-    grad[:, :n_features] += alpha * w
-    grad[:, -1] = diff.sum(axis=0)
+    grad[:, 1:n_features + 1] = safe_sparse_dot(diff.T, features)
+    grad[:, -1] = safe_sparse_dot(diff.T, neighbors).sum() #?
+    grad[:, 1:n_features + 2] += alpha * w
+    grad[:, 0] = diff.sum(axis=0)
     return loss, grad.ravel(), p
+
+def neighbors_from_edges(edges, y):
+    # assumes that edges are unique and only exist once i.e. if 1, 0
+    # appears then 0, 1 does not appear
+    lbin = LabelBinarizer()
+    Y_multi = lbin.fit_transform(y)
+
+    neighbors = np.zeros_like(Y_multi)
+
+    for i, j in edges:
+        neighbors[i] += Y_multi[j]
+        neighbors[j] += Y_multi[i]
+
+    return neighbors
 
 import sklearn
 from sklearn.datasets import load_iris
@@ -179,9 +203,8 @@ print(lr.predict_proba(iris.data)[50])
 
 
 lr = CenteredPotts(C=1000000000000000000000000000000)
-lr.fit(iris.data, iris.target)
+lr.fit((iris.data, np.array([])), iris.target)
 
-print(lr.predict_proba(iris.data)[50])
-
+print(lr.predict_proba((iris.data, np.array([])), iris.target)[50])
 
 
