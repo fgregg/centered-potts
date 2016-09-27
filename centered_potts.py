@@ -3,7 +3,8 @@ import numpy as np
 from scipy import optimize
 
 from sklearn.preprocessing import LabelBinarizer
-from sklearn.utils.extmath import logsumexp, safe_sparse_dot, squared_norm
+from sklearn.utils.extmath import (logsumexp, safe_sparse_dot, squared_norm,
+                                   softmax)
 
 
 
@@ -31,7 +32,7 @@ class CenteredPotts(object):
         if Y_multi.shape[1] == 1:
             Y_multi = np.hstack([1 - Y_multi, Y_multi])
             
-        w0 = np.zeros((self.classes_.size, n_features + 1),
+        w0 = np.zeros((self.classes_.size - 1, n_features + 1),
                       order='F')
 
         w0 = w0.ravel()
@@ -50,7 +51,7 @@ class CenteredPotts(object):
 
         n_iter_i = info['nit'] - 1
 
-        self.coef_ = np.reshape(w0, (self.classes_.size, -1))
+        self.coef_ = np.reshape(w0, (self.classes_.size - 1, -1))
 
         self.intercept_ = self.coef_[:, -1]
         self.coef_ = self.coef_[:, :-1]
@@ -65,7 +66,10 @@ class CenteredPotts(object):
         pass
 
     def predict_proba(self, X):
-        pass
+        scores = safe_sparse_dot(X, self.coef_.T, dense_output=True)
+        scores += self.intercept_
+        scores = np.hstack((scores, np.zeros((X.shape[0], 1))))
+        return softmax(scores)
 
 
 
@@ -101,12 +105,13 @@ def _multinomial_loss(w, X, Y, alpha, sample_weight):
     """
     n_classes = Y.shape[1]
     n_features = X.shape[1]
-    w = w.reshape(n_classes, -1)
+    w = w.reshape(n_classes - 1, -1)
     sample_weight = sample_weight[:, np.newaxis]
     intercept = w[:, -1]
     w = w[:, :-1]
     p = safe_sparse_dot(X, w.T)
     p += intercept
+    p = np.hstack((p, np.zeros((X.shape[0], 1))))
     p -= logsumexp(p, axis=1)[:, np.newaxis]
     loss = -(sample_weight * Y * p).sum()
     loss += 0.5 * alpha * squared_norm(w)
@@ -145,10 +150,10 @@ def _multinomial_loss_grad(w, X, Y, alpha, sample_weight):
     """
     n_classes = Y.shape[1]
     n_features = X.shape[1]
-    grad = np.zeros((n_classes, n_features + 1))
+    grad = np.zeros((n_classes - 1, n_features + 1))
     loss, p, w = _multinomial_loss(w, X, Y, alpha, sample_weight)
     sample_weight = sample_weight[:, np.newaxis]
-    diff = sample_weight * (p - Y)
+    diff = sample_weight * (p - Y)[:, :n_classes-1]
     grad[:, :n_features] = safe_sparse_dot(diff.T, X)
     grad[:, :n_features] += alpha * w
     grad[:, -1] = diff.sum(axis=0)
@@ -166,15 +171,17 @@ print(target)
 
 lr = LogisticRegression(fit_intercept=True,
                         multi_class='multinomial',
-                        solver='lbfgs')
+                        solver='lbfgs',
+                        C=1000000000000000000000000000000)
 lr.fit(iris.data, iris.target)
 
-print(lr.coef_)
+print(lr.predict_proba(iris.data)[50])
 
 
-lr = CenteredPotts()
+lr = CenteredPotts(C=1000000000000000000000000000000)
 lr.fit(iris.data, iris.target)
 
-print(lr.coef_)
+print(lr.predict_proba(iris.data)[50])
+
 
 
