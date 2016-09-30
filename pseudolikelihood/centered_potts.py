@@ -1,8 +1,9 @@
 import numpy as np
 
 from scipy import optimize
+from scipy.sparse import coo_matrix
 
-from sklearn.preprocessing import LabelBinarizer
+import sklearn.preprocessing
 from sklearn.utils.extmath import (logsumexp, safe_sparse_dot, squared_norm,
                                    softmax)
 
@@ -15,9 +16,7 @@ class CenteredPotts(object):
         self.C = C
 
     def fit(self, X, y):
-        features, edges = X
-
-        neighbors = neighbors_from_edges(edges, y)
+        features, A = X
 
         self.classes_ = np.unique(y)
         n_samples, n_features = features.shape
@@ -30,9 +29,11 @@ class CenteredPotts(object):
 
         sample_weight = np.ones(features.shape[0])
 
-        lbin = LabelBinarizer()
-        Y_multi = lbin.fit_transform(y)
-            
+        self.lbin = LabelBinarizer()
+        Y_multi = self.lbin.fit_transform(y)
+
+        neighbors = self.neighbors_from_adjacency(A, y)
+
         w0 = np.zeros((self.classes_.size - 1, n_features + 2),
                       order='F')
 
@@ -62,21 +63,42 @@ class CenteredPotts(object):
         
         
     def predict_proba(self, X, y):
-        features, edges = X
-        neighbors = neighbors_from_edges(edges, y)
+        features, A = X
+        neighbors = self.neighbors_from_adjacency(A, y)
 
-        lbin = LabelBinarizer()
-        Y_multi = lbin.fit_transform(y)
+        Y_multi = self.lbin.fit_transform(y)
 
         betas = self.coef_[:, :-1]
         eta = self.coef_[:, -1]
 
-        scores = safe_sparse_dot(features, betas.T, dense_output=True)
-        scores += self.intercept_
-        scores += eta * ((1 - Y_multi) * neighbors).sum()
+        p = safe_sparse_dot(features, betas.T, dense_output=True)
+        p += self.intercept_
 
-        scores = np.hstack((scores, np.zeros((features.shape[0], 1))))
-        return softmax(scores)
+        p_nonspatial = np.hstack((p, np.zeros((features.shape[0], 1))))
+        p_nonspatial -= logsumexp(p_nonspatial, axis=1)[:, np.newaxis]
+        p_nonspatial = np.exp(p_nonspatial, p_nonspatial)[:, :-1]
+
+        spatial = (neighbors[:-1, :, 0] * (0 - p_nonspatial).T +
+                   neighbors[:-1, :, 1] * (1 - p_nonspatial).T)
+
+        p += (eta * spatial).T
+
+        p = np.hstack((p, np.zeros((features.shape[0], 1))))
+
+        return softmax(p)
+
+    def neighbors_from_adjacency(self, A, y):
+        Y_multi = self.lbin.transform(y)
+
+        neighbors = A * Y_multi
+
+        potts_neighbors = np.zeros((neighbors.shape[1], neighbors.shape[0], 2))
+        for cls in range(neighbors.shape[1]):
+            potts_neighbors[cls][:, 0] = neighbors[:, cls]
+            potts_neighbors[cls][:, 1] = neighbors.sum(axis=1) - neighbors[:, cls]
+
+        return potts_neighbors
+    
 
 
 
@@ -126,6 +148,7 @@ def _multinomial_loss(w, features, neighbors, Y, alpha, sample_weight):
 
     spatial = (neighbors[:-1, :, 0] * (0 - p_nonspatial).T +
                neighbors[:-1, :, 1] * (1 - p_nonspatial).T)
+
     p += (eta * spatial).T
 
     p = np.hstack((p, np.zeros((features.shape[0], 1))))
@@ -184,21 +207,54 @@ def _multinomial_loss_grad(w, features, neighbors, Y, alpha, sample_weight):
     return loss, grad.ravel(), p
 
 
-def neighbors_from_edges(edges, y):
-    # assumes that edges are unique and only exist once i.e. if 1, 0
-    # appears then 0, 1 does not appear
-    lbin = LabelBinarizer()
-    Y_multi = lbin.fit_transform(y)
 
-    neighbors = np.zeros_like(Y_multi)
+def rpotts(X, model):
+    features, A = X
+    n_sites = features.shape[0]
 
-    for i, j in edges:
-        neighbors[i] += Y_multi[j]
-        neighbors[j] += Y_multi[i]
+    R = np.random.uniform(size=n_sites).reshape(-1, 1)
 
-    potts_neighbors = np.zeros((3, neighbors.shape[0], 2))
-    for cls in range(neighbors.shape[1]):
-        potts_neighbors[cls][:, 0] = neighbors[:, cls]
-        potts_neighbors[cls][:, 1] = neighbors.sum(axis=1) - neighbors[:, cls]
+    lower = np.zeros(n_sites).reshape(-1, 1)
+    upper = np.ones(n_sites).reshape(-1, 1)
 
-    return potts_neighbors
+    i = 0
+    while not np.array_equal(upper, lower):
+        i += 1
+        print(i)
+        print(upper.sum())
+        print(lower.sum())
+        import pdb
+        pdb.set_trace()
+        new_r = np.random.uniform(size=R.size).reshape(R.shape)
+        R = np.hstack((new_r, R))
+
+        lower[:] = 0
+        upper[:] = 1
+        
+        for r in R.T:
+            r = r.reshape(-1, 1)
+            
+            upper_p = model.predict_proba(X, upper)[:, :-1]
+            lower_p = model.predict_proba(X, lower)[:, :-1]
+
+            upper = (r > upper_p).astype(int)
+            lower = (r > lower_p).astype(int)
+
+    return lower
+
+class LabelBinarizer(sklearn.preprocessing.LabelBinarizer):
+    def transform(self, *args, **kwargs):
+        X = super().transform(*args, **kwargs)
+        if X.shape[1] == 1:
+            X = np.hstack((X, 1 - X))
+        return X
+
+
+def to_adjacency(edges):
+    N = edges.max() + 1
+    A = coo_matrix((np.ones(edges.shape[0]), (edges[:, 0], edges[:, 1])),
+                       shape=(N, N)).tocsc()
+    A += A.T
+
+    return A
+        
