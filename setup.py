@@ -11,7 +11,7 @@ setup(
     url='https://github.com/fgregg/psuedolikelihood',
     version='0.1',
     author='Forest Gregg',
-    author_email='fgregg@uchicag.edu',
+    author_email='fgregg@uchicago.edu',
     description='Estimate models with categorical, coupled outcomes using pseudolikelihood',
     packages=['pseudolikelihood'],
     install_requires=['numpy', 'sklearn', 'scipy'],

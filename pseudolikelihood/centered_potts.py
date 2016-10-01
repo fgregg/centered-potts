@@ -32,7 +32,7 @@ class CenteredPotts(object):
         self.lbin = LabelBinarizer()
         Y_multi = self.lbin.fit_transform(y)
 
-        neighbors = self.neighbors_from_adjacency(A, y)
+        #neighbors = self.neighbors_from_adjacency(A, y)
 
         w0 = np.zeros((self.classes_.size - 1, n_features + 2),
                       order='F')
@@ -44,7 +44,7 @@ class CenteredPotts(object):
 
         w0, loss, info = optimize.fmin_l_bfgs_b(
             func, w0, fprime=None,
-            args=(features, neighbors, target, 1. / self.C, sample_weight),
+            args=(features, A, target, 1. / self.C, sample_weight),
             iprint=(self.verbose > 0) - 1, pgtol=self.tol, maxiter=self.max_iter)
 
         if info["warnflag"] == 1 and self.verbose > 0:
@@ -64,7 +64,7 @@ class CenteredPotts(object):
         
     def predict_proba(self, X, y):
         features, A = X
-        neighbors = self.neighbors_from_adjacency(A, y)
+        #neighbors = self.neighbors_from_adjacency(A, y)
 
         Y_multi = self.lbin.fit_transform(y)
 
@@ -76,12 +76,11 @@ class CenteredPotts(object):
 
         p_nonspatial = np.hstack((p, np.zeros((features.shape[0], 1))))
         p_nonspatial -= logsumexp(p_nonspatial, axis=1)[:, np.newaxis]
-        p_nonspatial = np.exp(p_nonspatial, p_nonspatial)[:, :-1]
+        p_nonspatial = np.exp(p_nonspatial, p_nonspatial)
 
-        spatial = (neighbors[:-1, :, 0] * (0 - p_nonspatial).T +
-                   neighbors[:-1, :, 1] * (1 - p_nonspatial).T)
+        spatial = (A * (Y_multi - p_nonspatial))[:, :-1]
 
-        p += (eta * spatial).T
+        p += (eta * spatial)
 
         p = np.hstack((p, np.zeros((features.shape[0], 1))))
 
@@ -102,7 +101,7 @@ class CenteredPotts(object):
 
 
 
-def _multinomial_loss(w, features, neighbors, Y, alpha, sample_weight):
+def _multinomial_loss(w, features, A, Y, alpha, sample_weight):
     """Computes multinomial loss and class probabilities.
     Parameters
     ----------
@@ -144,12 +143,11 @@ def _multinomial_loss(w, features, neighbors, Y, alpha, sample_weight):
 
     p_nonspatial = np.hstack((p, np.zeros((features.shape[0], 1))))
     p_nonspatial -= logsumexp(p_nonspatial, axis=1)[:, np.newaxis]
-    p_nonspatial = np.exp(p_nonspatial, p_nonspatial)[:, :-1]
+    p_nonspatial = np.exp(p_nonspatial, p_nonspatial)
 
-    spatial = (neighbors[:-1, :, 0] * (0 - p_nonspatial).T +
-               neighbors[:-1, :, 1] * (1 - p_nonspatial).T)
+    spatial = (A * (Y - p_nonspatial))[:, :-1]
 
-    p += (eta * spatial).T
+    p += (eta * spatial)
 
     p = np.hstack((p, np.zeros((features.shape[0], 1))))
     p -= logsumexp(p, axis=1)[:, np.newaxis]
@@ -160,7 +158,7 @@ def _multinomial_loss(w, features, neighbors, Y, alpha, sample_weight):
     return loss, p_nonspatial, p, w
 
 
-def _multinomial_loss_grad(w, features, neighbors, Y, alpha, sample_weight):
+def _multinomial_loss_grad(w, features, A, Y, alpha, sample_weight):
     """Computes the multinomial loss, gradient and class probabilities.
     Parameters
     ----------
@@ -192,16 +190,15 @@ def _multinomial_loss_grad(w, features, neighbors, Y, alpha, sample_weight):
     n_classes = Y.shape[1]
     n_features = features.shape[1]
     grad = np.zeros((n_classes - 1, n_features + 2))
-    loss, p_nonspatial, p, w = _multinomial_loss(w, features, neighbors, Y,
+    loss, p_nonspatial, p, w = _multinomial_loss(w, features, A, Y,
                                                  alpha, sample_weight)
     sample_weight = sample_weight[:, np.newaxis]
     diff = sample_weight * (p - Y)[:, :n_classes-1]
     grad[:, 1:n_features + 1] = safe_sparse_dot(diff.T, features)
 
-    spatial = (neighbors[:-1, :, 0] * (0 - p_nonspatial).T +
-               neighbors[:-1, :, 1] * (1 - p_nonspatial).T)
-    
-    grad[:, -1] = (spatial * diff.T).sum(axis=1)
+    spatial = (A * (Y - p_nonspatial))[:, :-1]
+
+    grad[:, -1] = (spatial * diff).sum(axis=0)
     grad[:, 1:n_features + 2] += alpha * w
     grad[:, 0] = diff.sum(axis=0)
     return loss, grad.ravel(), p
@@ -219,12 +216,6 @@ def rpotts(X, model):
 
     i = 0
     while not np.array_equal(upper, lower):
-        i += 1
-        print(i)
-        print(upper.sum())
-        print(lower.sum())
-        import pdb
-        pdb.set_trace()
         new_r = np.random.uniform(size=R.size).reshape(R.shape)
         R = np.hstack((new_r, R))
 
