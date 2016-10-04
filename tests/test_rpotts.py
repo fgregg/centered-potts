@@ -50,12 +50,11 @@ class RandomPottsTest(unittest.TestCase) :
         potts = CenteredPotts()
         potts.fit((X, A), Z)
 
-        rpotts((X, A), potts)
         self.Y_multi = potts.lbin.transform(Z)
         self.Z = Z
 
     def test_fit(self):
-        potts = CenteredPotts()
+        potts = CenteredPotts(C=100000000000000000000)
         potts.fit((self.X, self.A), self.Z)
         print(potts.coef_)
         print(potts.intercept_)
