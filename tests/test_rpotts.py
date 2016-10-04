@@ -56,8 +56,13 @@ class RandomPottsTest(unittest.TestCase) :
     def test_fit(self):
         potts = CenteredPotts(C=100000000000000000000)
         potts.fit((self.X, self.A), self.Z)
-        print(potts.coef_)
-        print(potts.intercept_)
+        assert_array_almost_equal(potts.coef_,
+                                  np.array([[ 2.602, 1.298, 0.801]]),
+                                  3)
+        assert_array_almost_equal(potts.intercept_,
+                                  np.array([-0.155]),
+                                  3)
+
 
     def test_gradient(self):
         w = np.array([[0, 1, 1, 0.5]])
