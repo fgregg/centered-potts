@@ -29,7 +29,10 @@ class CenteredPotts(object):
 
         sample_weight = np.ones(features.shape[0])
 
-        self.lbin = LabelBinarizer()
+        if len(self.classes_) < 3:
+            self.lbin = BinaryLabelBinarizer()
+        else:
+            self.lbin = sklearn.preprocessing.LabelBinarizer()
         Y_multi = self.lbin.fit_transform(y)
 
         #neighbors = self.neighbors_from_adjacency(A, y)
@@ -147,7 +150,7 @@ def _multinomial_loss(w, features, A, Y, alpha, sample_weight):
 
     spatial = safe_sparse_dot(A, (Y - p_nonspatial))[:, :-1]
 
-    p += (eta * spatial)
+    p += (eta.T * spatial)
 
     p = np.hstack((p, np.zeros((features.shape[0], 1))))
 
@@ -216,13 +219,15 @@ def _multinomial_loss_grad(w, features, A, Y, alpha, sample_weight):
 
 
 def rpotts(X, model):
-    features, A = X    
+    features, A = X
+
+    n_classes = len(model.classes_)
     n_sites = features.shape[0]
 
     R = np.random.uniform(size=(n_sites, 1))
 
-    lower = np.zeros(n_sites).reshape(-1, 1)
-    upper = np.ones(n_sites).reshape(-1, 1)
+    lower = np.empty((n_sites, 1))
+    upper = np.empty((n_sites, 1))
 
     betas = model.coef_[:, :-1]
     eta = model.coef_[:, -1]
@@ -242,7 +247,7 @@ def rpotts(X, model):
 
         print(upper.sum(), lower.sum())
         lower[:] = 0
-        upper[:] = 1
+        upper[:] = n_classes - 1
 
         for r in R.T:
             r = r.reshape(-1, 1)
@@ -251,28 +256,28 @@ def rpotts(X, model):
             upper_spatial = safe_sparse_dot(A, (upper_multi - p_nonspatial))[:, :-1]
 
             upper_p = p + eta * upper_spatial
-            #upper_p1 = softmax(np.hstack((upper_p, np.zeros((features.shape[0], 1)))))[:, :-1]
-            upper_p = 1/(1 + np.exp(upper_p))
-
+            upper_p = softmax(np.hstack((upper_p, np.zeros((features.shape[0], 1)))))
+            upper_p = upper_p.cumsum(axis=1)
+            
             lower_multi = _target(lower)
             lower_spatial = safe_sparse_dot(A, (lower_multi - p_nonspatial))[:, :-1]
 
             lower_p = p + eta * lower_spatial
-            #lower_p = softmax(np.hstack((lower_p, np.zeros((features.shape[0], 1)))))[:, :-1]
-            lower_p = 1/(1 + np.exp(lower_p))
+            lower_p = softmax(np.hstack((lower_p, np.zeros((features.shape[0], 1)))))
+            lower_p = lower_p.cumsum(axis=1)
 
-            upper = (r > upper_p).astype(int)
-            lower = (r > lower_p).astype(int)
+            upper = (upper_p > r).argmax(axis = 1)
+            lower = (lower_p > r).argmax(axis = 1)
 
-    return lower
+    return lower.reshape(-1, 1)
 
-class LabelBinarizer(sklearn.preprocessing.LabelBinarizer):
+class BinaryLabelBinarizer(sklearn.preprocessing.LabelBinarizer):
     def transform(self, X):
         if np.in1d(X, [0, 1]).all():
             X = X.reshape(-1, 1)
             X = np.hstack((X, 1 - X))
         else:
-            X = super().transform(*args, **kwargs)
+            X = super().transform(X)
 
         return X
 
