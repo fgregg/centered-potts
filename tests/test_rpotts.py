@@ -52,22 +52,24 @@ class BinaryPottsTest(unittest.TestCase) :
 
         self.Y_multi = potts.lbin.transform(Z)
         self.Z = Z
-        
+
+        self.avg_neighbors = A.sum(axis=1).mean()
+
     def test_fit(self):
-        potts = CenteredPotts(C=100000000000000000000)
+        potts = CenteredPotts(C=float('inf'))
         potts.fit((self.X, self.A), self.Z)
         assert_array_almost_equal(potts.coef_,
-                                  np.array([[ 2.602, 1.298, 0.801]]),
+                                  np.array([[ 2.289,  1.796,  2.857]]),
                                   3)
         assert_array_almost_equal(potts.intercept_,
-                                  np.array([-0.155]),
+                                  np.array([-0.092]),
                                   3)
 
 
     def test_gradient(self):
-        w = np.array([[0, 1, 1, 0.5]])
-        features = self.X
+        w = np.array([[0, 1, 1, 0.5 * self.avg_neighbors]])
         A = self.A
+        features = self.X
         Y = self.Y_multi
         alpha = 0
         sample_weight = np.ones(features.shape[0])
@@ -76,13 +78,14 @@ class BinaryPottsTest(unittest.TestCase) :
         loss, grad, p = out
 
         assert_array_almost_equal(grad,
-                                  np.array([  1.955, -3.102,  -1.857, -24.036,]),
+                                  np.array([ 1.495, -2.708, -2.25 , -5.798]),
                                   3)
 
     def test_loss(self):
-        w = np.array([[0, 1, 1, 0.5]])
-        features = self.X
+        
+        w = np.array([[0, 1, 1, 0.5 * self.avg_neighbors]])
         A = self.A
+        features = self.X
         Y = self.Y_multi
         alpha = 0
         sample_weight = np.ones(features.shape[0])
@@ -90,7 +93,7 @@ class BinaryPottsTest(unittest.TestCase) :
         out = cp._multinomial_loss(w, features, A, Y, alpha, sample_weight)
         loss, p_nonspatial, p, out_w = out
 
-        assert_approx_equal(loss, 231.7263)
+        assert_approx_equal(loss, 232.612, 3)
         assert_array_almost_equal(p_nonspatial.sum(axis=1), np.ones(features.shape[0]))
         assert_array_almost_equal(p.sum(axis=1), np.ones(features.shape[0]))
         assert_array_almost_equal(w, out_w)
@@ -103,29 +106,29 @@ class BinaryPottsTest(unittest.TestCase) :
         potts = CenteredPotts(C=float('inf'))
         potts.fit((features, A), Z)
 
-        target = [[1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 1, 1,
+        target = [[1, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 1, 1,
                    1, 1, 0, 1, 1, 1, 0, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0,
-                   0, 1, 1, 0, 1, 1, 1, 1, 1, 0, 0, 0, 1, 0, 1, 0, 1,
-                   0, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 1,
-                   1, 1, 1, 0, 1, 1, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1,
+                   0, 1, 1, 0, 1, 1, 1, 1, 1, 0, 0, 0, 1, 0, 1, 0, 0,
+                   0, 1, 1, 1, 0, 1, 1, 1, 1, 0, 1, 1, 0, 0, 1, 1, 1,
+                   1, 1, 1, 0, 0, 1, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1,
                    0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 1, 0, 1, 1, 0, 0, 1,
                    1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 1, 0, 0, 1, 0, 0, 1,
                    0, 1, 1, 0, 1, 1, 1, 0, 0, 0, 1, 1, 0, 1, 1, 1, 0,
                    0, 1, 1, 0, 0, 1, 0, 0, 0, 1, 1, 0, 0, 1, 1, 1, 0,
-                   0, 0, 1, 1, 1, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 0, 1,
-                   1, 0, 1, 1, 0, 1, 1, 1, 1, 0, 0, 0, 1, 0, 0, 1, 0,
+                   0, 0, 1, 1, 1, 0, 1, 0, 0, 0, 1, 1, 1, 1, 1, 0, 1,
+                   1, 0, 1, 1, 0, 0, 1, 1, 1, 0, 0, 0, 1, 0, 0, 1, 0,
                    1, 1, 0, 1, 1, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0, 0, 1,
-                   1, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1,
-                   0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                   1, 1, 1, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 1, 0,
-                   0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0,
-                   0, 0, 0, 0, 1, 1, 1, 0, 1, 1, 0, 1, 1, 0, 0, 0, 0,
-                   1, 0, 1, 0, 1, 0, 0, 1, 0, 0, 0, 1, 1, 0, 1, 0, 1,
-                   0, 1, 1, 0, 1, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 1, 1,
-                   0, 1, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 1, 0, 0, 0, 0,
-                   1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 1, 1, 0, 1,
-                   0, 1, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 0,
-                   1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 0, 1, 0,
+                   1, 0, 0, 1, 1, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0,
+                   0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   1, 1, 1, 1, 0, 0, 0, 1, 0, 1, 0, 1, 0, 0, 1, 1, 0,
+                   0, 0, 0, 0, 0, 1, 1, 1, 0, 1, 0, 1, 0, 1, 1, 1, 0,
+                   0, 0, 0, 0, 1, 1, 1, 0, 1, 1, 0, 1, 1, 0, 0, 1, 0,
+                   1, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 1, 0, 1,
+                   0, 1, 1, 0, 1, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1,
+                   0, 1, 0, 1, 1, 0, 1, 1, 1, 1, 0, 0, 1, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 1, 0, 1,
+                   0, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 0, 1, 1, 0, 0, 0,
+                   1, 1, 0, 0, 0, 0, 0, 1, 1, 0, 1, 1, 0, 0, 0, 0, 0,
                    0, 1, 0, 1, 0, 0, 0, 0, 1]]
 
         import random
@@ -152,6 +155,7 @@ class MultiClassPottsTest(unittest.TestCase) :
         potts.fit((X, A), self.Z)
 
         self.Y_multi = potts.lbin.transform(self.Z)
+        self.avg_neighbors = A.sum(axis=1).mean()
 
 
     def test_loss(self):
@@ -167,15 +171,15 @@ class MultiClassPottsTest(unittest.TestCase) :
         out = cp._multinomial_loss(w, features, A, Y, alpha, sample_weight)
         loss, p_nonspatial, p, out_w = out
 
-        assert_approx_equal(loss, 475.72979)
+        assert_approx_equal(loss, 450.849, 3)
         assert_array_almost_equal(p_nonspatial.sum(axis=1), np.ones(features.shape[0]))
         assert_array_almost_equal(p.sum(axis=1), np.ones(features.shape[0]))
         assert_array_almost_equal(w, out_w)
 
     
     def test_gradient(self):
-        w = np.array([[0, 1, 1, 0.5],
-                      [0, 1, 1, 0.5]])
+        w = np.array([[0, 1, 1, 0.5 * self.avg_neighbors],
+                      [0, 1, 1, 0.5 * self.avg_neighbors]])
         features = self.X
         A = self.A
         Y = self.Y_multi
@@ -186,6 +190,6 @@ class MultiClassPottsTest(unittest.TestCase) :
         loss, grad, p = out
 
         assert_array_almost_equal(grad,
-                                  np.array([  5.281,  1.712,   2.13 ,  47.858,
-                                              0.3,    1.696,   1.798, 52.718]),
+                                  np.array([5.488, 1.661, 2.319, 12.916,
+                                            0.063, 1.632, 1.543, 14.744]),
                                   3)

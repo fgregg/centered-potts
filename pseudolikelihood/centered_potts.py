@@ -83,7 +83,7 @@ class CenteredPotts(object):
 
         spatial = safe_sparse_dot(A, (Y_multi - p_nonspatial))[:, :-1]
 
-        p += (eta * spatial)
+        p += eta.T * np.array(spatial/A.sum(axis=1))
 
         p = np.hstack((p, np.zeros((features.shape[0], 1))))
 
@@ -135,6 +135,8 @@ def _multinomial_loss(w, features, A, Y, alpha, sample_weight):
     """
     n_classes = Y.shape[1]
     n_features = features.shape[1]
+    n_neighbors = A.sum(axis=1).reshape(-1, 1)
+    
     w = w.reshape(n_classes - 1, -1)
     sample_weight = sample_weight[:, np.newaxis]
     intercept = w[:, 0]
@@ -148,9 +150,10 @@ def _multinomial_loss(w, features, A, Y, alpha, sample_weight):
     p_nonspatial -= logsumexp(p_nonspatial, axis=1)[:, np.newaxis]
     p_nonspatial = np.exp(p_nonspatial, p_nonspatial)
 
-    spatial = safe_sparse_dot(A, (Y - p_nonspatial))[:, :-1]
+    spatial = safe_sparse_dot(A, (Y - p_nonspatial))[:, :-1]/n_neighbors
+    spatial[np.isnan(spatial)] = 0
 
-    p += (eta.T * spatial)
+    p += eta.T * np.array(spatial)
 
     p = np.hstack((p, np.zeros((features.shape[0], 1))))
 
@@ -193,6 +196,8 @@ def _multinomial_loss_grad(w, features, A, Y, alpha, sample_weight):
     """
     n_classes = Y.shape[1]
     n_features = features.shape[1]
+    n_neighbors = A.sum(axis=1).reshape(-1, 1)
+    
     grad = np.zeros((n_classes - 1, n_features + 2))
 
     loss, p_nonspatial, p, w = _multinomial_loss(w, features, A, Y,
@@ -205,12 +210,16 @@ def _multinomial_loss_grad(w, features, A, Y, alpha, sample_weight):
     for c in range(n_classes - 1):
         mu = p_nonspatial[:, c].copy().reshape(-1, 1)
         mu *= (1 - mu)
-        centered_features = features - w[c, -1] * safe_sparse_dot(A, features * mu)
+        spatial = safe_sparse_dot(A, features * mu)/n_neighbors
+        spatial[np.isnan(spatial)] = 0
+        centered_features = features - w[c, -1] * spatial
+        
         grad[c, :(n_features + 1)] = safe_sparse_dot(diff[:, c].T, centered_features)
 
-    spatial = safe_sparse_dot(A, (Y - p_nonspatial))[:, :-1]
+    spatial = safe_sparse_dot(A, (Y - p_nonspatial))[:, :-1]/n_neighbors
+    spatial[np.isnan(spatial)] = 0
 
-    grad[:, -1] = (spatial * diff).sum(axis=0)
+    grad[:, -1] = (diff * np.array(spatial)).sum(axis=0)
 
     grad[:, 1:n_features + 2] += alpha * w[:, 1:]
 
@@ -223,6 +232,7 @@ def rpotts(X, model):
 
     n_classes = len(model.classes_)
     n_sites = features.shape[0]
+    n_neighbors = A.sum(axis=1).reshape(-1, 1)
 
     R = np.random.uniform(size=(n_sites, 1))
 
@@ -230,7 +240,7 @@ def rpotts(X, model):
     upper = np.empty((n_sites, 1))
 
     betas = model.coef_[:, :-1]
-    eta = model.coef_[:, -1]
+    eta = model.coef_[:, -1:]
 
     p = safe_sparse_dot(features, betas.T, dense_output=True)
     p += model.intercept_
@@ -253,16 +263,18 @@ def rpotts(X, model):
             r = r.reshape(-1, 1)
 
             upper_multi = _target(upper)
-            upper_spatial = safe_sparse_dot(A, (upper_multi - p_nonspatial))[:, :-1]
+            upper_spatial = safe_sparse_dot(A, (upper_multi - p_nonspatial))[:, :-1]/n_neighbors
+            upper_spatial[np.isnan(upper_spatial)] = 0
 
-            upper_p = p + eta * upper_spatial
+            upper_p = p + (eta.T * np.array(upper_spatial))
             upper_p = softmax(np.hstack((upper_p, np.zeros((features.shape[0], 1)))))
             upper_p = upper_p.cumsum(axis=1)
             
             lower_multi = _target(lower)
-            lower_spatial = safe_sparse_dot(A, (lower_multi - p_nonspatial))[:, :-1]
+            lower_spatial = safe_sparse_dot(A, (lower_multi - p_nonspatial))[:, :-1]/n_neighbors
+            lower_spatial[np.isnan(lower_spatial)] = 0
 
-            lower_p = p + eta * lower_spatial
+            lower_p = p + (eta.T * np.array(lower_spatial))
             lower_p = softmax(np.hstack((lower_p, np.zeros((features.shape[0], 1)))))
             lower_p = lower_p.cumsum(axis=1)
 
