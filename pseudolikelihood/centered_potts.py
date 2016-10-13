@@ -18,7 +18,11 @@ class CenteredPotts(object):
     def fit(self, X, y):
         features, A = X
 
-        self.classes_ = np.unique(y)
+        if y.shape[1] > 1:
+            self.classes_ = np.arange(y.shape[1])
+        else:
+            self.classes_ = np.unique(y)
+
         n_samples, n_features = features.shape
 
         n_classes = len(self.classes_)
@@ -29,10 +33,10 @@ class CenteredPotts(object):
 
         sample_weight = np.ones(features.shape[0])
 
-        if len(self.classes_) < 3:
+        if len(self.classes_) < 3 and features.shape[1] < 2:
             self.lbin = BinaryLabelBinarizer()
         else:
-            self.lbin = sklearn.preprocessing.LabelBinarizer()
+            self.lbin = LabelBinarizer()
         Y_multi = self.lbin.fit_transform(y)
 
         #neighbors = self.neighbors_from_adjacency(A, y)
@@ -136,6 +140,8 @@ def _multinomial_loss(w, features, A, Y, alpha, sample_weight):
     n_classes = Y.shape[1]
     n_features = features.shape[1]
     n_neighbors = A.sum(axis=1).reshape(-1, 1)
+
+    n_observations = Y.sum(axis=1)[:, np.newaxis]
     
     w = w.reshape(n_classes - 1, -1)
     sample_weight = sample_weight[:, np.newaxis]
@@ -150,17 +156,21 @@ def _multinomial_loss(w, features, A, Y, alpha, sample_weight):
     p_nonspatial -= logsumexp(p_nonspatial, axis=1)[:, np.newaxis]
     p_nonspatial = np.exp(p_nonspatial, p_nonspatial)
 
-    spatial = safe_sparse_dot(A, (Y - p_nonspatial))[:, :-1]/n_neighbors
+    spatial = safe_sparse_dot(A, (Y/n_observations - p_nonspatial))[:, :-1]/n_neighbors
     spatial[np.isnan(spatial)] = 0
 
     p += eta.T * np.array(spatial)
 
     p = np.hstack((p, np.zeros((features.shape[0], 1))))
 
-    p -= logsumexp(p, axis=1)[:, np.newaxis]
+    p -= logsumexp(p, axis=1)[:, np.newaxis] * n_observations
+
+    p += log_multinomial_coefficient(Y)[:, np.newaxis]
 
     loss = -(sample_weight * Y * p).sum()
-    loss += 0.5 * alpha * squared_norm(w[:, 1:])
+
+    loss += 0.5 * alpha * squared_norm(w[:, 1:])    
+
     p = np.exp(p, p)
     return loss, p_nonspatial, p, w
 
@@ -197,6 +207,7 @@ def _multinomial_loss_grad(w, features, A, Y, alpha, sample_weight):
     n_classes = Y.shape[1]
     n_features = features.shape[1]
     n_neighbors = A.sum(axis=1).reshape(-1, 1)
+    n_observations = Y.sum(axis=1)[:, np.newaxis]
     
     grad = np.zeros((n_classes - 1, n_features + 2))
 
@@ -204,7 +215,7 @@ def _multinomial_loss_grad(w, features, A, Y, alpha, sample_weight):
                                                  alpha, sample_weight)
 
     sample_weight = sample_weight[:, np.newaxis]
-    diff = sample_weight * (p - Y)[:, :n_classes-1]
+    diff = sample_weight * (p * n_observations - Y)[:, :n_classes-1]
 
     features = np.hstack((np.ones((features.shape[0], 1)), features))
     for c in range(n_classes - 1):
@@ -216,7 +227,7 @@ def _multinomial_loss_grad(w, features, A, Y, alpha, sample_weight):
         
         grad[c, :(n_features + 1)] = safe_sparse_dot(diff[:, c].T, centered_features)
 
-    spatial = safe_sparse_dot(A, (Y - p_nonspatial))[:, :-1]/n_neighbors
+    spatial = safe_sparse_dot(A, (Y/n_observations - p_nonspatial))[:, :-1]/n_neighbors
     spatial[np.isnan(spatial)] = 0
 
     grad[:, -1] = (diff * np.array(spatial)).sum(axis=0)
@@ -293,6 +304,23 @@ class BinaryLabelBinarizer(sklearn.preprocessing.LabelBinarizer):
 
         return X
 
+class LabelBinarizer(sklearn.preprocessing.LabelBinarizer):
+    def fit(self, X, **fit_params):
+        if X.shape[0] > 1:
+            self.multi_output = True
+        else:
+            self.multi_output = False
+            super.fit(X, **fit_params)
+
+        return self
+
+    def transform(self, X):
+        if self.multi_output:
+            return X
+        else:
+            return super().transform(X)
+    
+    
 
 def to_adjacency(edges):
     N = edges.max() + 1
@@ -326,3 +354,17 @@ def grid_adjacency_matrix(M, N=None):
 
     return A
 
+def log_factorial(i):
+    return np.sum(np.log(np.arange(1, i + 1)))
+
+def log_multinomial_coefficient(choices):
+    m = np.sum(choices, axis=1)
+    lf = np.vectorize(log_factorial)
+
+    coef = lf(m) - np.sum(lf(choices))
+
+    return coef
+    
+
+    
+    
