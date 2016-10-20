@@ -18,7 +18,7 @@ class CenteredPotts(object):
     def fit(self, X, y):
         features, A = X
 
-        if y.shape[1] > 1:
+        if len(y.shape) > 1 and y.shape[1] > 1:
             self.classes_ = np.arange(y.shape[1])
         else:
             self.classes_ = np.unique(y)
@@ -33,11 +33,12 @@ class CenteredPotts(object):
 
         sample_weight = np.ones(features.shape[0])
 
-        if len(self.classes_) < 3 and features.shape[1] < 2:
+        if len(self.classes_) < 3 and (len(y.shape) < 2 or y.shape[1] < 2):
             self.lbin = BinaryLabelBinarizer()
         else:
             self.lbin = LabelBinarizer()
         Y_multi = self.lbin.fit_transform(y)
+        print(Y_multi)
 
         #neighbors = self.neighbors_from_adjacency(A, y)
 
@@ -142,7 +143,7 @@ def _multinomial_loss(w, features, A, Y, alpha, sample_weight):
     n_neighbors = A.sum(axis=1).reshape(-1, 1)
 
     n_observations = Y.sum(axis=1)[:, np.newaxis]
-    
+
     w = w.reshape(n_classes - 1, -1)
     sample_weight = sample_weight[:, np.newaxis]
     intercept = w[:, 0]
@@ -160,20 +161,18 @@ def _multinomial_loss(w, features, A, Y, alpha, sample_weight):
     spatial[np.isnan(spatial)] = 0
 
     p += eta.T * np.array(spatial)
-
+    
     p = np.hstack((p, np.zeros((features.shape[0], 1))))
 
-    p -= logsumexp(p, axis=1)[:, np.newaxis] * n_observations
+    loss = (p * Y).sum(axis=1) - logsumexp(p, axis=1) * n_observations[:, 0]
+    loss += log_multinomial_coefficient(Y)
+    loss = -(loss * sample_weight[:, 0]).sum()
+    loss += 0.5 * alpha * squared_norm(w[:, 1:])
 
-    p += log_multinomial_coefficient(Y)[:, np.newaxis]
-
-    loss = -(sample_weight * Y * p).sum()
-
-    loss += 0.5 * alpha * squared_norm(w[:, 1:])    
-
+    p -= logsumexp(p, axis=1)[:, np.newaxis]
     p = np.exp(p, p)
-    return loss, p_nonspatial, p, w
 
+    return loss, p_nonspatial, p, w
 
 def _multinomial_loss_grad(w, features, A, Y, alpha, sample_weight):
     """Computes the multinomial loss, gradient and class probabilities.
@@ -306,11 +305,11 @@ class BinaryLabelBinarizer(sklearn.preprocessing.LabelBinarizer):
 
 class LabelBinarizer(sklearn.preprocessing.LabelBinarizer):
     def fit(self, X, **fit_params):
-        if X.shape[0] > 1:
+        if len(X.shape) > 1 and X.shape[1] > 1:
             self.multi_output = True
         else:
             self.multi_output = False
-            super.fit(X, **fit_params)
+            super().fit(X, **fit_params)
 
         return self
 
