@@ -38,11 +38,8 @@ class CenteredPotts(object):
         else:
             self.lbin = LabelBinarizer()
         Y_multi = self.lbin.fit_transform(y)
-        print(Y_multi)
 
-        #neighbors = self.neighbors_from_adjacency(A, y)
-
-        w0 = np.zeros((self.classes_.size - 1, n_features + 2),
+        w0 = np.zeros((self.classes_.size - 1, n_features + n_classes),
                       order='F')
 
         w0 = w0.ravel()
@@ -72,7 +69,6 @@ class CenteredPotts(object):
         
     def predict_proba(self, X, y):
         features, A = X
-        #neighbors = self.neighbors_from_adjacency(A, y)
 
         Y_multi = self.lbin.transform(y)
 
@@ -147,8 +143,8 @@ def _multinomial_loss(w, features, A, Y, alpha, sample_weight):
     w = w.reshape(n_classes - 1, -1)
     sample_weight = sample_weight[:, np.newaxis]
     intercept = w[:, 0]
-    betas = w[:, 1:-1]
-    eta = w[:, -1:]
+    betas = w[:, 1:(n_features + 1)]
+    eta = w[:, (n_features + 1):]
 
     p = safe_sparse_dot(features, betas.T)
     p += intercept
@@ -157,10 +153,13 @@ def _multinomial_loss(w, features, A, Y, alpha, sample_weight):
     p_nonspatial -= logsumexp(p_nonspatial, axis=1)[:, np.newaxis]
     p_nonspatial = np.exp(p_nonspatial, p_nonspatial)
 
-    spatial = safe_sparse_dot(A, (Y/n_observations - p_nonspatial))[:, :-1]/n_neighbors
+    spatial = safe_sparse_dot(A, (Y/n_observations - p_nonspatial))/n_neighbors
     spatial[np.isnan(spatial)] = 0
 
-    p += eta.T * np.array(spatial)
+    for k in range(n_classes - 1):
+        p[:, k:k+1] += safe_sparse_dot(np.delete(spatial, k, axis = 1),
+                                       eta[k:k+1, :].T)
+        
     
     p = np.hstack((p, np.zeros((features.shape[0], 1))))
 
@@ -208,7 +207,7 @@ def _multinomial_loss_grad(w, features, A, Y, alpha, sample_weight):
     n_neighbors = A.sum(axis=1).reshape(-1, 1)
     n_observations = Y.sum(axis=1)[:, np.newaxis]
     
-    grad = np.zeros((n_classes - 1, n_features + 2))
+    grad = np.zeros((n_classes - 1, n_features + n_classes))
 
     loss, p_nonspatial, p, w = _multinomial_loss(w, features, A, Y,
                                                  alpha, sample_weight)
@@ -217,21 +216,27 @@ def _multinomial_loss_grad(w, features, A, Y, alpha, sample_weight):
     diff = sample_weight * (p * n_observations - Y)[:, :n_classes-1]
 
     features = np.hstack((np.ones((features.shape[0], 1)), features))
-    for c in range(n_classes - 1):
-        mu = p_nonspatial[:, c].copy().reshape(-1, 1)
-        mu *= (1 - mu)
-        spatial = safe_sparse_dot(A, features * mu)/n_neighbors
-        spatial[np.isnan(spatial)] = 0
-        centered_features = features - w[c, -1] * spatial
-        
-        grad[c, :(n_features + 1)] = safe_sparse_dot(diff[:, c].T, centered_features)
+    for k in range(n_classes - 1):
+        mu = np.delete(p_nonspatial, k, axis=1)
+        mu *= p_nonspatial[:, k][:, np.newaxis]
 
-    spatial = safe_sparse_dot(A, (Y/n_observations - p_nonspatial))[:, :-1]/n_neighbors
+        centered_features = features.copy()
+        for j, eta in enumerate(w[k, (n_features + 1):]):
+            spatial = safe_sparse_dot(A, features * mu[:, j:j+1])/n_neighbors
+            spatial[np.isnan(spatial)] = 0
+            centered_features -= eta * spatial
+        
+        grad[k, :(n_features + 1)] = safe_sparse_dot(diff[:, k].T, centered_features)
+
+        
+    spatial = safe_sparse_dot(A, (Y/n_observations - p_nonspatial))/n_neighbors
     spatial[np.isnan(spatial)] = 0
 
-    grad[:, -1] = (diff * np.array(spatial)).sum(axis=0)
+    for k in range(n_classes - 1):
+        grad[k, (n_features + 1):] = (diff[:, k:k+1]  *  np.array(np.delete(spatial, k, axis = 1))).sum(axis=0)
 
-    grad[:, 1:n_features + 2] += alpha * w[:, 1:]
+
+    grad[:, 1:] += alpha * w[:, 1:]
 
     return loss, grad.ravel(), p
 
