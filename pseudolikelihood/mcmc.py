@@ -31,7 +31,6 @@ def rmultinomial(X, n_observations, model):
 
     sample = multinomial(n_observations, p_nonspatial)
     for i in range(1000):
-        print(i)
         spatial = safe_sparse_dot(A, (sample/n_observations - p_nonspatial))/n_neighbors
         spatial[np.isnan(spatial)] = 0
 
