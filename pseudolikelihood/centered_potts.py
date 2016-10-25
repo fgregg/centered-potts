@@ -326,8 +326,7 @@ class LabelBinarizer(sklearn.preprocessing.LabelBinarizer):
     
     
 
-def to_adjacency(edges):
-    N = edges.max() + 1
+def to_adjacency(edges, N):
     A = coo_matrix((np.ones(edges.shape[0]), (edges[:, 0], edges[:, 1])),
                        shape=(N, N)).tocsc()
     A += A.T
