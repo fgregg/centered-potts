@@ -9,11 +9,12 @@ from sklearn.utils.extmath import (logsumexp, safe_sparse_dot, squared_norm,
 
 
 class CenteredPotts(object):
-    def __init__(self, tol=1e-4, max_iter=100, verbose=0, C=1.0):
+    def __init__(self, tol=1e-4, max_iter=100, verbose=0, C=1.0, average_spatial=True):
         self.tol = tol
         self.max_iter = max_iter
         self.verbose = verbose
         self.C = C
+        self.average_spatial = average_spatial
 
     def fit(self, X, y):
         features, A = X
@@ -49,7 +50,7 @@ class CenteredPotts(object):
 
         w0, loss, info = optimize.fmin_l_bfgs_b(
             func, w0, fprime=None,
-            args=(features, A, target, 1. / self.C, sample_weight),
+            args=(features, A, target, 1. / self.C, sample_weight, self.average_spatial),
             iprint=(self.verbose > 0) - 1, pgtol=self.tol, maxiter=self.max_iter)
 
         if info["warnflag"] == 1 and self.verbose > 0:
@@ -105,7 +106,7 @@ class CenteredPotts(object):
 
 
 
-def _multinomial_loss(w, features, A, Y, alpha, sample_weight):
+def _multinomial_loss(w, features, A, Y, alpha, sample_weight, average_spatial=True):
     """Computes multinomial loss and class probabilities.
     Parameters
     ----------
@@ -136,7 +137,10 @@ def _multinomial_loss(w, features, A, Y, alpha, sample_weight):
     """
     n_classes = Y.shape[1]
     n_features = features.shape[1]
-    n_neighbors = A.sum(axis=1).reshape(-1, 1)
+    if average_spatial:
+        n_neighbors = A.sum(axis=1).reshape(-1, 1)
+    else:
+        n_neighbors = np.ones((n_features, 1))
 
     n_observations = Y.sum(axis=1)[:, np.newaxis]
 
@@ -173,7 +177,7 @@ def _multinomial_loss(w, features, A, Y, alpha, sample_weight):
 
     return loss, p_nonspatial, p, w
 
-def _multinomial_loss_grad(w, features, A, Y, alpha, sample_weight):
+def _multinomial_loss_grad(w, features, A, Y, alpha, sample_weight, average_spatial=True):
     """Computes the multinomial loss, gradient and class probabilities.
     Parameters
     ----------
@@ -204,13 +208,17 @@ def _multinomial_loss_grad(w, features, A, Y, alpha, sample_weight):
     """
     n_classes = Y.shape[1]
     n_features = features.shape[1]
-    n_neighbors = A.sum(axis=1).reshape(-1, 1)
+    if average_spatial:
+        n_neighbors = A.sum(axis=1).reshape(-1, 1)
+    else:
+        n_neighbors = np.ones((n_features, 1))
     n_observations = Y.sum(axis=1)[:, np.newaxis]
     
     grad = np.zeros((n_classes - 1, n_features + n_classes))
 
     loss, p_nonspatial, p, w = _multinomial_loss(w, features, A, Y,
-                                                 alpha, sample_weight)
+                                                 alpha, sample_weight,
+                                                 average_spatial)
 
     sample_weight = sample_weight[:, np.newaxis]
     diff = sample_weight * (p * n_observations - Y)[:, :n_classes-1]
@@ -247,6 +255,7 @@ def rpotts(X, model):
 
     n_classes = len(model.classes_)
     n_sites = features.shape[0]
+    
     n_neighbors = A.sum(axis=1).reshape(-1, 1)
 
     R = np.random.uniform(size=(n_sites, 1))
