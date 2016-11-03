@@ -1,2 +1,2 @@
-# centered-potts
-Estimating the Centered Potts model with Pseudolikelihood
+# Psuedolikelihood
+Estimating the markov random fields using maximum pseudolikelihood estimation. Work, VERY MUCH, in progress.
